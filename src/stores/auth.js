@@ -5,7 +5,7 @@ export const useAuthStore = defineStore('auth', {
     state: () => ({
         user: null,
         token: localStorage.getItem('token'),
-        returnUrl: null
+        returnUrl: null,
     }),
 
     getters: {
@@ -19,12 +19,28 @@ export const useAuthStore = defineStore('auth', {
                 const response = await api.post('/register', credentials);
                 this.user = response.data.user;
                 this.token = response.data.access_token;
+
+                // Save token in localStorage
                 localStorage.setItem('token', response.data.access_token);
                 console.log('Registration successful');
                 return true;
             } catch (error) {
                 console.error('Registration error:', error.response?.data || error.message);
-                throw error;
+
+                // Handle specific validation errors
+                if (error.response?.data?.errors) {
+                    const validationErrors = error.response.data.errors;
+                    if (validationErrors.email) {
+                        throw new Error(validationErrors.email[0]); // Duplicate email error
+                    } else if (validationErrors.password) {
+                        throw new Error(validationErrors.password[0]); // Password validation error
+                    }
+                }
+
+                // Throw general error message if no specific validation error
+                throw new Error(
+                    error.response?.data?.message || 'Registration failed. Please try again.'
+                );
             }
         },
 
@@ -34,46 +50,52 @@ export const useAuthStore = defineStore('auth', {
                 const response = await api.post('/login', credentials);
                 this.user = response.data.user;
                 this.token = response.data.access_token;
+
+                // Save token in localStorage
                 localStorage.setItem('token', response.data.access_token);
                 console.log('Login successful');
                 return true;
             } catch (error) {
                 console.error('Login error:', error.response?.data || error.message);
-                throw error;
+
+                // Handle specific errors
+                if (error.response?.data?.errors) {
+                    const validationErrors = error.response.data.errors;
+                    if (validationErrors.email) {
+                        throw new Error(validationErrors.email[0]); // Incorrect email error
+                    } else if (validationErrors.password) {
+                        throw new Error(validationErrors.password[0]); // Incorrect password error
+                    }
+                }
+
+                // Throw general error message if no specific validation error
+                throw new Error(
+                    error.response?.data?.message || 'Login failed. Please check your credentials.'
+                );
             }
         },
 
         async logout() {
             try {
                 console.log('Starting logout process...');
-                
-                if (!this.token) {
-                    console.log('No token found, clearing state only');
-                    this.clearAuth();
-                    return true;
-                }
-
-                try {
-                    const response = await api.post('/logout', {}, {
-                        headers: {
-                            Authorization: `Bearer ${this.token}`
+                if (this.token) {
+                    await api.post(
+                        '/logout',
+                        {},
+                        {
+                            headers: {
+                                Authorization: `Bearer ${this.token}`,
+                            },
                         }
-                    });
-                    console.log('Logout API response:', response.data);
-                } catch (apiError) {
-                    console.error('Logout API error:', apiError.response?.data || apiError.message);
-                } finally {
-                    // Always clear local state
-                    this.clearAuth();
-                    console.log('Local state cleared');
+                    );
+                    console.log('Logout successful');
                 }
-                
-                return true;
             } catch (error) {
-                console.error('Logout error:', error);
-                // Still clear local state
+                console.error('Logout error:', error.response?.data || error.message);
+            } finally {
+                // Clear local auth state regardless of API call success
                 this.clearAuth();
-                throw error;
+                console.log('Local state cleared');
             }
         },
 
@@ -86,16 +108,22 @@ export const useAuthStore = defineStore('auth', {
         async fetchUser() {
             try {
                 if (!this.token) return null;
-                const response = await api.get('/user');
+                const response = await api.get('/user', {
+                    headers: {
+                        Authorization: `Bearer ${this.token}`,
+                    },
+                });
                 this.user = response.data.user;
                 return this.user;
             } catch (error) {
                 console.error('Fetch user error:', error.response?.data || error.message);
+
+                // Clear auth state if unauthorized
                 if (error.response?.status === 401) {
                     this.clearAuth();
                 }
-                throw error;
+                throw new Error('Unable to fetch user information.');
             }
-        }
-    }
+        },
+    },
 });
